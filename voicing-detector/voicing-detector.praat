@@ -1,4 +1,4 @@
-﻿#################################################################################
+#################################################################################
 # SCRIPT DE ANÁLISE DE PROPORÇÃO DE VOZEAMENTO (F0 / PITCH)
 # Criado e adaptado por VITOR PRADO, UFMG (BR) (2025)
 # Avaliação acústica robusta para dissertações baseada em proporção de frames vozeados
@@ -6,13 +6,24 @@
 
 form Configurações de Vozeamento
     comment Configurações de Diretório (Copie e cole do Windows normalmente)
-    sentence Diretorio_de_entrada C:\Users\VitorPrado\Documents\Doutorado\data\textgrids
-    sentence Diretorio_de_saida C:\Users\VitorPrado\Documents\Doutorado\data\textgrids_voicing-analysed
+    sentence Diretorio_de_entrada -
+    sentence Diretorio_de_saida -
     
-    comment Configurações dos Segmentos
+    comment Configurações do Alvo
     natural Tier_dos_fones 1
     word Alvo_desvozeado s
+    
+    comment Regra de Busca de Contexto
+    choice Regra_de_Contexto 1
+        button 1. Apenas contexto seguinte
+        button 2. Apenas contexto anterior
+        button 3. Ambos os contextos
+        button 4. Ignorar contexto (qualquer ocorrencia do alvo)
+        
+    word Contexto_anterior a
     word Contexto_seguinte b
+    
+    comment Rótulos de Substituição
     word Substituto_vozeado z
     word Substituto_incerto s/z
     
@@ -65,7 +76,6 @@ for i from 1 to numberOfWavs
     Insert interval tier: voicingtier, "voicing_percent"
 
     # EXTRAÇÃO DE F0 (PITCH)
-    # Range de 75 a 600 Hz (padrão para cobrir vozes masculinas e femininas)
     selectObject: thisSound
     thisPitch = To Pitch: 0.01, 75, 600
     
@@ -73,12 +83,38 @@ for i from 1 to numberOfWavs
         selectObject: thisTextGrid
         thisPhoneme$ = Get label of interval: tier_dos_fones, thisInterval
         
-        nextInterval = thisInterval + 1
-
-        if nextInterval <= numberOfPhonemes
-            nextPhoneme$ = Get label of interval: tier_dos_fones, nextInterval
-
-            if thisPhoneme$ = alvo_desvozeado$ and nextPhoneme$ = contexto_seguinte$
+        # Só prossegue se encontrou o fonema alvo
+        if thisPhoneme$ = alvo_desvozeado$
+            
+            # Pega o contexto anterior com segurança (evita erro no 1º intervalo)
+            if thisInterval > 1
+                prevPhoneme$ = Get label of interval: tier_dos_fones, thisInterval - 1
+            else
+                prevPhoneme$ = ""
+            endif
+            
+            # Pega o contexto seguinte com segurança (evita erro no último intervalo)
+            if thisInterval < numberOfPhonemes
+                nextPhoneme$ = Get label of interval: tier_dos_fones, thisInterval + 1
+            else
+                nextPhoneme$ = ""
+            endif
+            
+            # AVALIAÇÃO DA REGRA DE CONTEXTO ESCOLHIDA
+            contexto_valido = 0
+            
+            if regra_de_Contexto == 1 and nextPhoneme$ = contexto_seguinte$
+                contexto_valido = 1
+            elsif regra_de_Contexto == 2 and prevPhoneme$ = contexto_anterior$
+                contexto_valido = 1
+            elsif regra_de_Contexto == 3 and prevPhoneme$ = contexto_anterior$ and nextPhoneme$ = contexto_seguinte$
+                contexto_valido = 1
+            elsif regra_de_Contexto == 4
+                contexto_valido = 1
+            endif
+            
+            # Se o contexto bater com o que o usuário escolheu, faz a análise
+            if contexto_valido == 1
                 
                 thisPhonemeStartTime = Get start point: tier_dos_fones, thisInterval
                 thisPhonemeEndTime = Get end point: tier_dos_fones, thisInterval
@@ -89,18 +125,15 @@ for i from 1 to numberOfWavs
                 total_frames = 0
                 voiced_frames = 0
                 
-                # Checa a presença de F0 a cada 0.01 segundos (10 milissegundos) dentro do "s"
                 t = thisPhonemeStartTime
                 while t <= thisPhonemeEndTime
                     total_frames = total_frames + 1
                     pitch_val = Get value at time: t, "Hertz", "Linear"
                     
-                    # Se o Praat achar um valor numérico (diferente de undefined), tem vibração
                     if string$(pitch_val) <> "--undefined--"
                         voiced_frames = voiced_frames + 1
                     endif
                     
-                    # Avança 0.01 segundos para a próxima checagem
                     t = t + 0.01
                 endwhile
                 
@@ -112,14 +145,13 @@ for i from 1 to numberOfWavs
                 
                 porcentagem$ = fixed$ (porcentagem, 1) + "%"
                 
-                appendInfoLine: " - Segmento [", alvo_desvozeado$, "] encontrado. Vozeamento: ", porcentagem$
+                appendInfoLine: " - Segmento [", alvo_desvozeado$, "] processado. Vozeamento: ", porcentagem$
 
                 # APLICAÇÃO DA LÓGICA ESCOLHIDA
                 selectObject: thisTextGrid
                 novo_rotulo$ = thisPhoneme$
                 
                 if tipo_de_Analise == 1 ; Binário
-                    # No binário, vamos usar a média entre os dois limiares do formulário como corte
                     corte_binario = (limiar_Desvozeado_Ate_X + limiar_Vozeado_Acima_de_X) / 2
                     if porcentagem >= corte_binario
                         novo_rotulo$ = substituto_vozeado$
@@ -132,12 +164,10 @@ for i from 1 to numberOfWavs
                     endif
                 endif
                 
-                # Substitui no tier original se o método for 1 ou 2 e houver mudança
                 if tipo_de_Analise <> 3
                     Set interval text: tier_dos_fones, thisInterval, novo_rotulo$
                 endif
                 
-                # Inserir fronteiras e a porcentagem no novo tier de vozeamento
                 Insert boundary: voicingtier, thisPhonemeStartTime
                 Insert boundary: voicingtier, thisPhonemeEndTime
                 
